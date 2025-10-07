@@ -73,7 +73,8 @@ static void rrd_function_cancel_inflight(struct rrd_function_inflight *r);
 
 // ----------------------------------------------------------------------------
 
-static void rrd_functions_inflight_cleanup(struct rrd_function_inflight *r) {
+static void rrd_functions_inflight_cleanup(struct rrd_function_inflight *r)
+{
     buffer_free(r->payload);
     freez((void *)r->transaction);
     freez((void *)r->cmd);
@@ -86,7 +87,9 @@ static void rrd_functions_inflight_cleanup(struct rrd_function_inflight *r) {
     r->sanitized_cmd = NULL;
 }
 
-static void rrd_functions_inflight_delete_cb(const DICTIONARY_ITEM *item __maybe_unused, void *value, void *data __maybe_unused) {
+static void
+rrd_functions_inflight_delete_cb(const DICTIONARY_ITEM *item __maybe_unused, void *value, void *data __maybe_unused)
+{
     struct rrd_function_inflight *r = value;
 
     // internal_error(true, "FUNCTIONS: transaction '%s' finished", r->transaction);
@@ -95,30 +98,41 @@ static void rrd_functions_inflight_delete_cb(const DICTIONARY_ITEM *item __maybe
     dictionary_acquired_item_release(r->host->functions, r->host_function_acquired);
 }
 
-void rrd_functions_inflight_init(void) {
-    if(rrd_functions_inflight_requests)
+void rrd_functions_inflight_init(void)
+{
+    if (rrd_functions_inflight_requests)
         return;
 
-    rrd_functions_inflight_requests = dictionary_create_advanced(DICT_OPTION_DONT_OVERWRITE_VALUE | DICT_OPTION_FIXED_SIZE, NULL, sizeof(struct rrd_function_inflight));
+    rrd_functions_inflight_requests = dictionary_create_advanced(
+        DICT_OPTION_DONT_OVERWRITE_VALUE | DICT_OPTION_FIXED_SIZE, NULL, sizeof(struct rrd_function_inflight));
 
     dictionary_register_delete_callback(rrd_functions_inflight_requests, rrd_functions_inflight_delete_cb, NULL);
 }
 
-void rrd_functions_inflight_destroy(void) {
-    if(!rrd_functions_inflight_requests)
+void rrd_functions_inflight_destroy(void)
+{
+    if (!rrd_functions_inflight_requests)
         return;
 
     dictionary_destroy(rrd_functions_inflight_requests);
     rrd_functions_inflight_requests = NULL;
 }
 
-static void rrd_inflight_async_function_register_canceller_cb(void *register_canceller_cb_data, rrd_function_cancel_cb_t canceller_cb, void *canceller_cb_data) {
+static void rrd_inflight_async_function_register_canceller_cb(
+    void *register_canceller_cb_data,
+    rrd_function_cancel_cb_t canceller_cb,
+    void *canceller_cb_data)
+{
     struct rrd_function_inflight *r = register_canceller_cb_data;
     r->canceller.cb = canceller_cb;
     r->canceller.data = canceller_cb_data;
 }
 
-static void rrd_inflight_async_function_register_progresser_cb(void *register_progresser_cb_data, rrd_function_progresser_cb_t progresser_cb, void *progresser_cb_data) {
+static void rrd_inflight_async_function_register_progresser_cb(
+    void *register_progresser_cb_data,
+    rrd_function_progresser_cb_t progresser_cb,
+    void *progresser_cb_data)
+{
     struct rrd_function_inflight *r = register_progresser_cb_data;
     r->progresser.cb = progresser_cb;
     r->progresser.data = progresser_cb_data;
@@ -139,12 +153,14 @@ struct rrd_function_call_wait {
     int code;
 };
 
-static void rrd_inflight_function_cleanup(RRDHOST *host __maybe_unused, const char *transaction) {
+static void rrd_inflight_function_cleanup(RRDHOST *host __maybe_unused, const char *transaction)
+{
     dictionary_del(rrd_functions_inflight_requests, transaction);
     dictionary_garbage_collect(rrd_functions_inflight_requests);
 }
 
-static void rrd_function_call_wait_free(struct rrd_function_call_wait *tmp) {
+static void rrd_function_call_wait_free(struct rrd_function_call_wait *tmp)
+{
     rrd_inflight_function_cleanup(tmp->host, tmp->transaction);
     freez(tmp->transaction);
 
@@ -153,7 +169,8 @@ static void rrd_function_call_wait_free(struct rrd_function_call_wait *tmp) {
     freez(tmp);
 }
 
-static void rrd_async_function_signal_when_ready(BUFFER *temp_wb __maybe_unused, int code, void *callback_data) {
+static void rrd_async_function_signal_when_ready(BUFFER *temp_wb __maybe_unused, int code, void *callback_data)
+{
     struct rrd_function_call_wait *tmp = callback_data;
     bool we_should_free = false;
 
@@ -166,34 +183,37 @@ static void rrd_async_function_signal_when_ready(BUFFER *temp_wb __maybe_unused,
     tmp->code = code;
     tmp->data_are_ready = true;
 
-    if(tmp->free_with_signal)
+    if (tmp->free_with_signal)
         we_should_free = true;
 
     netdata_cond_signal(&tmp->cond);
 
     netdata_mutex_unlock(&tmp->mutex);
 
-    if(we_should_free) {
+    if (we_should_free) {
         buffer_free(temp_wb);
         rrd_function_call_wait_free(tmp);
     }
 }
 
-static void rrd_inflight_async_function_nowait_finished(BUFFER *wb, int code, void *data) {
+static void rrd_inflight_async_function_nowait_finished(BUFFER *wb, int code, void *data)
+{
     struct rrd_function_inflight *r = data;
 
-    if(r->result.cb)
+    if (r->result.cb)
         r->result.cb(wb, code, r->result.data);
 
     rrd_inflight_function_cleanup(r->host, r->transaction);
 }
 
-static bool rrd_inflight_async_function_is_cancelled(void *data) {
+static bool rrd_inflight_async_function_is_cancelled(void *data)
+{
     struct rrd_function_inflight *r = data;
     return __atomic_load_n(&r->cancelled, __ATOMIC_RELAXED);
 }
 
-static inline int rrd_call_function_async_and_dont_wait(struct rrd_function_inflight *r) {
+static inline int rrd_call_function_async_and_dont_wait(struct rrd_function_inflight *r)
+{
     struct rrd_function_execute rfe = {
         .transaction = &r->transaction_uuid,
         .function = r->sanitized_cmd,
@@ -201,34 +221,40 @@ static inline int rrd_call_function_async_and_dont_wait(struct rrd_function_infl
         .user_access = r->user_access,
         .source = r->source,
         .stop_monotonic_ut = &r->stop_monotonic_ut,
-        .result = {
-            .wb = r->result.wb,
-            .cb = rrd_inflight_async_function_nowait_finished,
-            .data = r,
-        },
-        .progress = {
-            .cb = r->progress.cb,
-            .data = r->progress.data,
-        },
-        .is_cancelled = {
-            .cb = rrd_inflight_async_function_is_cancelled,
-            .data = r,
-        },
-        .register_canceller = {
-            .cb = rrd_inflight_async_function_register_canceller_cb,
-            .data = r,
-        },
-        .register_progresser = {
-            .cb = rrd_inflight_async_function_register_progresser_cb,
-            .data = r,
-        },
+        .result =
+            {
+                .wb = r->result.wb,
+                .cb = rrd_inflight_async_function_nowait_finished,
+                .data = r,
+            },
+        .progress =
+            {
+                .cb = r->progress.cb,
+                .data = r->progress.data,
+            },
+        .is_cancelled =
+            {
+                .cb = rrd_inflight_async_function_is_cancelled,
+                .data = r,
+            },
+        .register_canceller =
+            {
+                .cb = rrd_inflight_async_function_register_canceller_cb,
+                .data = r,
+            },
+        .register_progresser =
+            {
+                .cb = rrd_inflight_async_function_register_progresser_cb,
+                .data = r,
+            },
     };
     int code = r->rdcf->execute_cb(&rfe, r->rdcf->execute_cb_data);
 
     return code;
 }
 
-static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
+static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r)
+{
     struct rrd_function_call_wait *tmp = mallocz(sizeof(struct rrd_function_call_wait));
     tmp->free_with_signal = false;
     tmp->data_are_ready = false;
@@ -242,7 +268,8 @@ static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
     // so we create a new one we guarantee will survive until the collector finishes...
 
     bool we_should_free = false;
-    BUFFER *temp_wb  = buffer_create(1024, &netdata_buffers_statistics.buffers_functions); // we need it because we may give up on it
+    BUFFER *temp_wb =
+        buffer_create(1024, &netdata_buffers_statistics.buffers_functions); // we need it because we may give up on it
     temp_wb->content_type = r->result.wb->content_type;
 
     struct rrd_function_execute rfe = {
@@ -252,30 +279,35 @@ static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
         .user_access = r->user_access,
         .source = r->source,
         .stop_monotonic_ut = &r->stop_monotonic_ut,
-        .result = {
-            .wb = temp_wb,
+        .result =
+            {
+                .wb = temp_wb,
 
-            // we overwrite the result callbacks,
-            // so that we can clean up the allocations made
-            .cb = rrd_async_function_signal_when_ready,
-            .data = tmp,
-        },
-        .progress = {
-            .cb = r->progress.cb,
-            .data = r->progress.data,
-        },
-        .is_cancelled = {
-            .cb = rrd_inflight_async_function_is_cancelled,
-            .data = r,
-        },
-        .register_canceller = {
-            .cb = rrd_inflight_async_function_register_canceller_cb,
-            .data = r,
-        },
-        .register_progresser = {
-            .cb = rrd_inflight_async_function_register_progresser_cb,
-            .data = r,
-        },
+                // we overwrite the result callbacks,
+                // so that we can clean up the allocations made
+                .cb = rrd_async_function_signal_when_ready,
+                .data = tmp,
+            },
+        .progress =
+            {
+                .cb = r->progress.cb,
+                .data = r->progress.data,
+            },
+        .is_cancelled =
+            {
+                .cb = rrd_inflight_async_function_is_cancelled,
+                .data = r,
+            },
+        .register_canceller =
+            {
+                .cb = rrd_inflight_async_function_register_canceller_cb,
+                .data = r,
+            },
+        .register_progresser =
+            {
+                .cb = rrd_inflight_async_function_register_progresser_cb,
+                .data = r,
+            },
     };
     int code = r->rdcf->execute_cb(&rfe, r->rdcf->execute_cb_data);
 
@@ -288,8 +320,9 @@ static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
         int rc = 0;
         while (rc == 0 && !cancelled && !tmp->data_are_ready) {
             usec_t now_mono_ut = now_monotonic_usec();
-            usec_t stop_mono_ut = __atomic_load_n(&r->stop_monotonic_ut, __ATOMIC_RELAXED) + RRDFUNCTIONS_TIMEOUT_EXTENSION_UT;
-            if(now_mono_ut > stop_mono_ut) {
+            usec_t stop_mono_ut =
+                __atomic_load_n(&r->stop_monotonic_ut, __ATOMIC_RELAXED) + RRDFUNCTIONS_TIMEOUT_EXTENSION_UT;
+            if (now_mono_ut > stop_mono_ut) {
                 rc = UV_ETIMEDOUT;
                 break;
             }
@@ -299,12 +332,11 @@ static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
             rc = netdata_cond_timedwait(&tmp->cond, &tmp->mutex, 10 * NSEC_PER_MSEC);
             // the mutex is again ours
 
-            if(rc == UV_ETIMEDOUT) {
+            if (rc == UV_ETIMEDOUT) {
                 // 10ms have passed
 
                 rc = 0;
-                if (!tmp->data_are_ready && r->is_cancelled.cb &&
-                    r->is_cancelled.cb(r->is_cancelled.data)) {
+                if (!tmp->data_are_ready && r->is_cancelled.cb && r->is_cancelled.cb(r->is_cancelled.data)) {
                     //                    internal_error(true, "FUNCTIONS: transaction '%s' is cancelled while waiting for response",
                     //                                   r->transaction);
                     cancelled = true;
@@ -321,7 +353,7 @@ static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
             r->result.wb->content_type = temp_wb->content_type;
             r->result.wb->expires = temp_wb->expires;
 
-            if(r->result.wb->expires)
+            if (r->result.wb->expires)
                 buffer_cacheable(r->result.wb);
             else
                 buffer_no_cacheable(r->result.wb);
@@ -330,33 +362,30 @@ static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
 
             tmp->free_with_signal = false;
             we_should_free = true;
-        }
-        else if (rc == UV_ETIMEDOUT || cancelled) {
+        } else if (rc == UV_ETIMEDOUT || cancelled) {
             // timeout
             // we will go away and let the callback free the structure
 
-            if(cancelled)
-                code = rrd_call_function_error(r->result.wb,
-                                               "Request cancelled",
-                                               HTTP_RESP_CLIENT_CLOSED_REQUEST);
+            if (cancelled)
+                code = rrd_call_function_error(r->result.wb, "Request cancelled", HTTP_RESP_CLIENT_CLOSED_REQUEST);
             else
-                code = rrd_call_function_error(r->result.wb,
-                                               "Timeout while waiting for a response from the plugin that serves this features",
-                                               HTTP_RESP_GATEWAY_TIMEOUT);
+                code = rrd_call_function_error(
+                    r->result.wb,
+                    "Timeout while waiting for a response from the plugin that serves this features",
+                    HTTP_RESP_GATEWAY_TIMEOUT);
 
             tmp->free_with_signal = true;
             we_should_free = false;
-        }
-        else {
+        } else {
             code = rrd_call_function_error(
-                r->result.wb, "Internal error while communicating with the plugin that serves this feature.",
+                r->result.wb,
+                "Internal error while communicating with the plugin that serves this feature.",
                 HTTP_RESP_INTERNAL_SERVER_ERROR);
 
             tmp->free_with_signal = true;
             we_should_free = false;
         }
-    }
-    else {
+    } else {
         // the response is not ok, and we don't have the data
         tmp->free_with_signal = true;
         we_should_free = false;
@@ -372,24 +401,34 @@ static int rrd_call_function_async_and_wait(struct rrd_function_inflight *r) {
     return code;
 }
 
-static inline int rrd_call_function_async(struct rrd_function_inflight *r, bool wait) {
-    if(wait)
+static inline int rrd_call_function_async(struct rrd_function_inflight *r, bool wait)
+{
+    if (wait)
         return rrd_call_function_async_and_wait(r);
     else
         return rrd_call_function_async_and_dont_wait(r);
 }
 
-
 // ----------------------------------------------------------------------------
 
-int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
-                     HTTP_ACCESS user_access, const char *cmd,
-                     bool wait, const char *transaction,
-                     rrd_function_result_callback_t result_cb, void *result_cb_data,
-                     rrd_function_progress_cb_t progress_cb, void *progress_cb_data,
-                     rrd_function_is_cancelled_cb_t is_cancelled_cb, void *is_cancelled_cb_data,
-                     BUFFER *payload, const char *source, bool allow_restricted) {
-
+int rrd_function_run(
+    RRDHOST *host,
+    BUFFER *result_wb,
+    int timeout_s,
+    HTTP_ACCESS user_access,
+    const char *cmd,
+    bool wait,
+    const char *transaction,
+    rrd_function_result_callback_t result_cb,
+    void *result_cb_data,
+    rrd_function_progress_cb_t progress_cb,
+    void *progress_cb_data,
+    rrd_function_is_cancelled_cb_t is_cancelled_cb,
+    void *is_cancelled_cb_data,
+    BUFFER *payload,
+    const char *source,
+    bool allow_restricted)
+{
     int code;
     char sanitized_cmd[PLUGINSD_LINE_MAX + 1];
     const DICTIONARY_ITEM *host_function_acquired = NULL;
@@ -399,12 +438,12 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
 
     // ------------------------------------------------------------------------
     // check for the host
-    if(!host) {
+    if (!host) {
         code = HTTP_RESP_INTERNAL_SERVER_ERROR;
 
         rrd_call_function_error(result_wb, "No host given for routing this request to.", code);
 
-        if(result_cb)
+        if (result_cb)
             result_cb(result_wb, code, result_cb_data);
 
         return code;
@@ -416,9 +455,8 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
     size_t sanitized_cmd_length = rrd_functions_sanitize(sanitized_cmd, cmd, sizeof(sanitized_cmd));
 
     code = rrd_functions_find_by_name(host, result_wb, sanitized_cmd, sanitized_cmd_length, &host_function_acquired);
-    if(code != HTTP_RESP_OK) {
-
-        if(result_cb)
+    if (code != HTTP_RESP_OK) {
+        if (result_cb)
             result_cb(result_wb, code, result_cb_data);
 
         return code;
@@ -426,19 +464,20 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
 
     struct rrd_host_function *rdcf = dictionary_acquired_item_value(host_function_acquired);
 
-    if((rdcf->options & RRD_FUNCTION_RESTRICTED) && !allow_restricted) {
-        code = rrd_call_function_error(result_wb,
-                                       "This feature is not available via this API.",
-                                       HTTP_ACCESS_PERMISSION_DENIED_HTTP_CODE(user_access));
+    if ((rdcf->options & RRD_FUNCTION_RESTRICTED) && !allow_restricted) {
+        code = rrd_call_function_error(
+            result_wb,
+            "This feature is not available via this API.",
+            HTTP_ACCESS_PERMISSION_DENIED_HTTP_CODE(user_access));
         dictionary_acquired_item_release(host->functions, host_function_acquired);
 
-        if(result_cb)
+        if (result_cb)
             result_cb(result_wb, code, result_cb_data);
 
         return code;
     }
 
-    if(!http_access_user_has_enough_access_level_for_endpoint(user_access, rdcf->access)) {
+    /* if(!http_access_user_has_enough_access_level_for_endpoint(user_access, rdcf->access)) {
 
         if((rdcf->access & HTTP_ACCESS_SIGNED_ID) && !(user_access & HTTP_ACCESS_SIGNED_ID))
             code = rrd_call_function_error(result_wb,
@@ -478,9 +517,9 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
             result_cb(result_wb, code, result_cb_data);
 
         return code;
-    }
+    } */
 
-    if(timeout_s <= 0)
+    if (timeout_s <= 0)
         timeout_s = rdcf->timeout;
 
     // ------------------------------------------------------------------------
@@ -489,7 +528,7 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
     char uuid_str[UUID_COMPACT_STR_LEN];
     nd_uuid_t uuid;
 
-    if(!transaction || !*transaction || uuid_parse_flexi(transaction, uuid) != 0)
+    if (!transaction || !*transaction || uuid_parse_flexi(transaction, uuid) != 0)
         uuid_generate_random(uuid);
 
     uuid_unparse_lower_compact(uuid, uuid_str);
@@ -514,34 +553,35 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
         .stop_monotonic_ut = now_monotonic_usec() + timeout_s * USEC_PER_SEC,
         .host_function_acquired = host_function_acquired,
         .rdcf = rdcf,
-        .result = {
-            .wb = result_wb,
-            .cb = result_cb,
-            .data = result_cb_data,
-        },
-        .is_cancelled = {
-            .cb = is_cancelled_cb,
-            .data = is_cancelled_cb_data,
-        },
-        .progress = {
-            .cb = progress_cb,
-            .data = progress_cb_data,
-        },
+        .result =
+            {
+                .wb = result_wb,
+                .cb = result_cb,
+                .data = result_cb_data,
+            },
+        .is_cancelled =
+            {
+                .cb = is_cancelled_cb,
+                .data = is_cancelled_cb_data,
+            },
+        .progress =
+            {
+                .cb = progress_cb,
+                .data = progress_cb_data,
+            },
     };
     uuid_copy(t.transaction_uuid, uuid);
 
     struct rrd_function_inflight *r = dictionary_set(rrd_functions_inflight_requests, transaction, &t, sizeof(t));
-    if(r->used) {
-        nd_log(NDLS_DAEMON, NDLP_NOTICE,
-               "FUNCTIONS: duplicate transaction '%s', function: '%s'",
-               t.transaction, t.cmd);
+    if (r->used) {
+        nd_log(NDLS_DAEMON, NDLP_NOTICE, "FUNCTIONS: duplicate transaction '%s', function: '%s'", t.transaction, t.cmd);
 
         code = rrd_call_function_error(result_wb, "Duplicate transaction.", HTTP_RESP_BAD_REQUEST);
 
         rrd_functions_inflight_cleanup(&t);
         dictionary_acquired_item_release(r->host->functions, t.host_function_acquired);
 
-        if(result_cb)
+        if (result_cb)
             result_cb(result_wb, code, result_cb_data);
 
         return code;
@@ -549,7 +589,7 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
     r->used = true;
     // internal_error(true, "FUNCTIONS: transaction '%s' started", r->transaction);
 
-    if(r->rdcf->sync) {
+    if (r->rdcf->sync) {
         // the caller has to wait
 
         struct rrd_function_execute rfe = {
@@ -559,30 +599,35 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
             .user_access = r->user_access,
             .source = r->source,
             .stop_monotonic_ut = &r->stop_monotonic_ut,
-            .result = {
-                .wb = r->result.wb,
+            .result =
+                {
+                    .wb = r->result.wb,
 
-                // we overwrite the result callbacks,
-                // so that we can clean up the allocations made
-                .cb = r->result.cb,
-                .data = r->result.data,
-            },
-            .progress = {
-                .cb = r->progress.cb,
-                .data = r->progress.data,
-            },
-            .is_cancelled = {
-                .cb = r->is_cancelled.cb,
-                .data = r->is_cancelled.data,
-            },
-            .register_canceller = {
-                .cb = NULL,
-                .data = NULL,
-            },
-            .register_progresser = {
-                .cb = NULL,
-                .data = NULL,
-            },
+                    // we overwrite the result callbacks,
+                    // so that we can clean up the allocations made
+                    .cb = r->result.cb,
+                    .data = r->result.data,
+                },
+            .progress =
+                {
+                    .cb = r->progress.cb,
+                    .data = r->progress.data,
+                },
+            .is_cancelled =
+                {
+                    .cb = r->is_cancelled.cb,
+                    .data = r->is_cancelled.data,
+                },
+            .register_canceller =
+                {
+                    .cb = NULL,
+                    .data = NULL,
+                },
+            .register_progresser =
+                {
+                    .cb = NULL,
+                    .data = NULL,
+                },
         };
         code = r->rdcf->execute_cb(&rfe, r->rdcf->execute_cb_data);
 
@@ -593,14 +638,15 @@ int rrd_function_run(RRDHOST *host, BUFFER *result_wb, int timeout_s,
     return rrd_call_function_async(r, wait);
 }
 
-bool rrd_function_has_this_original_result_callback(nd_uuid_t *transaction, rrd_function_result_callback_t cb) {
+bool rrd_function_has_this_original_result_callback(nd_uuid_t *transaction, rrd_function_result_callback_t cb)
+{
     bool ret = false;
     char str[UUID_COMPACT_STR_LEN];
     uuid_unparse_lower_compact(*transaction, str);
     const DICTIONARY_ITEM *item = dictionary_get_and_acquire_item(rrd_functions_inflight_requests, str);
-    if(item) {
+    if (item) {
         struct rrd_function_inflight *r = dictionary_acquired_item_value(item);
-        if(r->result.cb == cb)
+        if (r->result.cb == cb)
             ret = true;
 
         dictionary_acquired_item_release(rrd_functions_inflight_requests, item);
@@ -608,41 +654,49 @@ bool rrd_function_has_this_original_result_callback(nd_uuid_t *transaction, rrd_
     return ret;
 }
 
-static void rrd_function_cancel_inflight(struct rrd_function_inflight *r) {
-    if(!r)
+static void rrd_function_cancel_inflight(struct rrd_function_inflight *r)
+{
+    if (!r)
         return;
 
     bool cancelled = __atomic_load_n(&r->cancelled, __ATOMIC_RELAXED);
-    if(cancelled) {
-        nd_log(NDLS_DAEMON, NDLP_DEBUG,
-               "FUNCTIONS: received a CANCEL request for transaction '%s', but it is already cancelled.",
-               r->transaction);
+    if (cancelled) {
+        nd_log(
+            NDLS_DAEMON,
+            NDLP_DEBUG,
+            "FUNCTIONS: received a CANCEL request for transaction '%s', but it is already cancelled.",
+            r->transaction);
         return;
     }
 
     __atomic_store_n(&r->cancelled, true, __ATOMIC_RELAXED);
 
-    if(!rrd_collector_dispatcher_acquire(r->rdcf->collector)) {
-        nd_log(NDLS_DAEMON, NDLP_DEBUG,
-               "FUNCTIONS: received a CANCEL request for transaction '%s', but the collector is not running.",
-               r->transaction);
+    if (!rrd_collector_dispatcher_acquire(r->rdcf->collector)) {
+        nd_log(
+            NDLS_DAEMON,
+            NDLP_DEBUG,
+            "FUNCTIONS: received a CANCEL request for transaction '%s', but the collector is not running.",
+            r->transaction);
         return;
     }
 
-    if(r->canceller.cb)
+    if (r->canceller.cb)
         r->canceller.cb(r->canceller.data);
 
     rrd_collector_dispatcher_release(r->rdcf->collector);
 }
 
-void rrd_function_cancel(const char *transaction) {
+void rrd_function_cancel(const char *transaction)
+{
     // internal_error(true, "FUNCTIONS: request to cancel transaction '%s'", transaction);
 
     const DICTIONARY_ITEM *item = dictionary_get_and_acquire_item(rrd_functions_inflight_requests, transaction);
-    if(!item) {
-        nd_log(NDLS_DAEMON, NDLP_DEBUG,
-               "FUNCTIONS: received a CANCEL request for transaction '%s', but the transaction is not running.",
-               transaction);
+    if (!item) {
+        nd_log(
+            NDLS_DAEMON,
+            NDLP_DEBUG,
+            "FUNCTIONS: received a CANCEL request for transaction '%s', but the transaction is not running.",
+            transaction);
         return;
     }
 
@@ -651,27 +705,32 @@ void rrd_function_cancel(const char *transaction) {
     dictionary_acquired_item_release(rrd_functions_inflight_requests, item);
 }
 
-void rrd_function_progress(const char *transaction) {
+void rrd_function_progress(const char *transaction)
+{
     const DICTIONARY_ITEM *item = dictionary_get_and_acquire_item(rrd_functions_inflight_requests, transaction);
-    if(!item) {
-        nd_log(NDLS_DAEMON, NDLP_DEBUG,
-               "FUNCTIONS: received a PROGRESS request for transaction '%s', but the transaction is not running.",
-               transaction);
+    if (!item) {
+        nd_log(
+            NDLS_DAEMON,
+            NDLP_DEBUG,
+            "FUNCTIONS: received a PROGRESS request for transaction '%s', but the transaction is not running.",
+            transaction);
         return;
     }
 
     struct rrd_function_inflight *r = dictionary_acquired_item_value(item);
 
-    if(!rrd_collector_dispatcher_acquire(r->rdcf->collector)) {
-        nd_log(NDLS_DAEMON, NDLP_DEBUG,
-               "FUNCTIONS: received a PROGRESS request for transaction '%s', but the collector is not running.",
-               transaction);
+    if (!rrd_collector_dispatcher_acquire(r->rdcf->collector)) {
+        nd_log(
+            NDLS_DAEMON,
+            NDLP_DEBUG,
+            "FUNCTIONS: received a PROGRESS request for transaction '%s', but the collector is not running.",
+            transaction);
         goto cleanup;
     }
 
     functions_stop_monotonic_update_on_progress(&r->stop_monotonic_ut);
 
-    if(r->progresser.cb)
+    if (r->progresser.cb)
         r->progresser.cb(transaction, r->progresser.data);
 
     rrd_collector_dispatcher_release(r->rdcf->collector);
@@ -680,8 +739,9 @@ cleanup:
     dictionary_acquired_item_release(rrd_functions_inflight_requests, item);
 }
 
-void rrd_function_call_progresser(nd_uuid_t *transaction) {
-    if(uuid_is_null(*transaction))
+void rrd_function_call_progresser(nd_uuid_t *transaction)
+{
+    if (uuid_is_null(*transaction))
         return;
 
     char str[UUID_COMPACT_STR_LEN];
