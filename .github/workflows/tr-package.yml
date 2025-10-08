@@ -37,8 +37,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: anirudh-r-2506
+          password: ${{ secrets.TOKEN }}
 
       - name: Build and Push
         uses: docker/build-push-action@v6
@@ -47,8 +47,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/netdata:latest
-            ghcr.io/${{ github.repository_owner }}/netdata:${{ github.sha }}
+            ghcr.io/anirudh-r-2506/tr_netdata:latest
+            ghcr.io/anirudh-r-2506/tr_netdata:${{ github.sha }}
           build-args: |
             OFFICIAL_IMAGE=false
             BUILD_VERSION=custom-${{ github.sha }}
