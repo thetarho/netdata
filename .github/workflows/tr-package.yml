@@ -1,0 +1,57 @@
+---
+name: Custom Docker Build
+
+on:
+  push:
+    branches:
+      - package
+  pull_request:
+    branches:
+      - package
+    types:
+      - closed
+
+jobs:
+  build-and-push:
+    name: Build and Push Custom Docker Image for Netdata
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/netdata:latest
+            ghcr.io/${{ github.repository_owner }}/netdata:${{ github.sha }}
+          build-args: |
+            OFFICIAL_IMAGE=false
+            BUILD_VERSION=custom-${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
