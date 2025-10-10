@@ -129,6 +129,7 @@ option(ENABLE_DASHBOARD "Enable local dashboard" True)
 mark_as_advanced(ENABLE_DASHBOARD)
 
 # Data collection plugins
+option(ENABLE_PLUGIN_BASETEN "Enable Baseten AI model deployment monitoring" ${DEFAULT_FEATURE_STATE})
 option(ENABLE_PLUGIN_GO "Enable metric collectors written in Go" ${DEFAULT_FEATURE_STATE})
 option(ENABLE_PLUGIN_OTEL "Enable collection of OpenTelemetry metrics and logs" ${DEFAULT_FEATURE_STATE})
 option(ENABLE_PLUGIN_PYTHON "Enable metric collectors written in Python" ${DEFAULT_FEATURE_STATE})
@@ -1666,6 +1667,14 @@ set(STATSD_PLUGIN_FILES
         src/collectors/statsd.plugin/statsd.c
 )
 
+set(BASETEN_PLUGIN_FILES
+        src/collectors/baseten.plugin/baseten-main.c
+        src/collectors/baseten.plugin/baseten-api.c
+        src/collectors/baseten.plugin/baseten-function.c
+        src/collectors/baseten.plugin/baseten-utils.c
+        src/collectors/baseten.plugin/baseten-internals.h
+)
+
 set(SYSTEMD_JOURNAL_PLUGIN_FILES
         src/collectors/systemd-journal.plugin/systemd-journal.c
         src/collectors/systemd-journal.plugin/systemd-journal-fstat.c
@@ -2755,6 +2764,26 @@ if(ENABLE_PLUGIN_SYSTEMD_JOURNAL)
                         ${PKG_FILES_PATH}/copyright
                         COMPONENT plugin-systemd-journal
                         DESTINATION usr/share/doc/netdata-plugin-systemd-journal)
+        endif()
+endif()
+
+if(ENABLE_PLUGIN_BASETEN)
+        find_package(CURL REQUIRED)
+        pkg_check_modules(JSON_C REQUIRED json-c)
+
+        add_executable(baseten.plugin ${BASETEN_PLUGIN_FILES})
+        target_link_libraries(baseten.plugin libnetdata ${CURL_LIBRARIES} ${JSON_C_LIBRARIES})
+        target_include_directories(baseten.plugin PRIVATE ${JSON_C_INCLUDE_DIRS})
+
+        install(TARGETS baseten.plugin
+                COMPONENT plugin-baseten
+                DESTINATION usr/libexec/netdata/plugins.d)
+
+        if(BUILD_FOR_PACKAGING)
+                install(FILES
+                        ${PKG_FILES_PATH}/copyright
+                        COMPONENT plugin-baseten
+                        DESTINATION usr/share/doc/netdata-plugin-baseten)
         endif()
 endif()
 

@@ -30,19 +30,6 @@ RUN chmod +x netdata-installer.sh && \
    CFLAGS="$(packaging/docker/gen-cflags.sh)" LDFLAGS="-Wl,--gc-sections" ./netdata-installer.sh --dont-wait --dont-start-it --use-system-protobuf \
    ${EXTRA_INSTALL_OPTS} --disable-ebpf --enable-plugin-otel --install-no-prefix / "$([ "$RELEASE_CHANNEL" = stable ] && echo --stable-channel)"
 
-# Build Baseten Plugin AFTER netdata is installed (so libnetdata is available)
-RUN apt-get update && apt-get install -y \
-    libcurl4-openssl-dev \
-    libjson-c-dev \
-    cmake \
-    && rm -rf /var/lib/apt/lists/* && \
-    cd /opt/netdata.git/src/collectors/baseten.plugin && \
-    mkdir -p build && cd build && \
-    cmake -DCMAKE_C_FLAGS="-I/opt/netdata.git/src" .. && \
-    make && \
-    mkdir -p /tmp/baseten && \
-    cp baseten.plugin /tmp/baseten/
-
 # files to one directory
 RUN mkdir -p /app/usr/sbin/ \
              /app/usr/share \
@@ -66,8 +53,6 @@ RUN mkdir -p /app/usr/sbin/ \
     mv packaging/docker/health.sh     /app/usr/sbin/ && \
     mkdir -p /deps/etc && \
     cp -rp /deps/etc /app/usr/local/etc && \
-    cp /tmp/baseten/baseten.plugin /app/usr/libexec/netdata/plugins.d/ && \
-    chmod 755 /app/usr/libexec/netdata/plugins.d/baseten.plugin && \
     chmod -R o+rX /app && \
     chmod +x /app/usr/sbin/run.sh
 
