@@ -23,25 +23,25 @@ ENV DEBUG_BUILD=$DEBUG_BUILD
 COPY . /opt/netdata.git
 WORKDIR /opt/netdata.git
 
-# Build Baseten Plugin
-RUN apt-get update && apt-get install -y \
-    libcurl4-openssl-dev \
-    libjson-c-dev \
-    cmake \
-    && rm -rf /var/lib/apt/lists/* && \
-    cd src/collectors/baseten.plugin && \
-    mkdir -p build && cd build && \
-    cmake .. && \
-    make && \
-    mkdir -p /tmp/baseten && \
-    cp baseten.plugin /tmp/baseten/
-
 # Install from source
 RUN chmod +x netdata-installer.sh && \
    cp -rp /deps/* /usr/local/ && \
    /bin/echo -e "INSTALL_TYPE='oci'\nPREBUILT_ARCH='$(uname -m)'" > ./system/.install-type && \
    CFLAGS="$(packaging/docker/gen-cflags.sh)" LDFLAGS="-Wl,--gc-sections" ./netdata-installer.sh --dont-wait --dont-start-it --use-system-protobuf \
    ${EXTRA_INSTALL_OPTS} --disable-ebpf --enable-plugin-otel --install-no-prefix / "$([ "$RELEASE_CHANNEL" = stable ] && echo --stable-channel)"
+
+# Build Baseten Plugin AFTER netdata is installed (so libnetdata is available)
+RUN apt-get update && apt-get install -y \
+    libcurl4-openssl-dev \
+    libjson-c-dev \
+    cmake \
+    && rm -rf /var/lib/apt/lists/* && \
+    cd /opt/netdata.git/src/collectors/baseten.plugin && \
+    mkdir -p build && cd build && \
+    cmake -DCMAKE_C_FLAGS="-I/opt/netdata.git/src" .. && \
+    make && \
+    mkdir -p /tmp/baseten && \
+    cp baseten.plugin /tmp/baseten/
 
 # files to one directory
 RUN mkdir -p /app/usr/sbin/ \
