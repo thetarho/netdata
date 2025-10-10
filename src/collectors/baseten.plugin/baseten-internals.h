@@ -4,7 +4,6 @@
 #define BASETEN_INTERNALS_H
 
 #include "libnetdata/libnetdata.h"
-#include "libnetdata/required_dummies.h"
 #include "database/rrd.h"
 
 #include <curl/curl.h>

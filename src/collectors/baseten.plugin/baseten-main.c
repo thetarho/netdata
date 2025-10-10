@@ -5,6 +5,16 @@
 
 #define BASETEN_WORKER_THREADS 2
 
+// Required dummy functions for external plugins
+void rrdset_thread_rda_free(void){}
+void sender_thread_buffer_free(void){}
+void query_target_free(void){}
+void service_exits(void){}
+void rrd_collector_finished(void){}
+
+// Required by get_system_cpus()
+const char *netdata_configured_host_prefix = "";
+
 // Global state
 struct baseten_config config = {0};
 struct baseten_cache cache = {0};
