@@ -4,21 +4,21 @@
 
 extern const char* baseten_severity_to_string(deployment_severity_t severity);
 
-void baseten_function_deployments(const char *transaction __maybe_unused,
-                                   const char *function __maybe_unused,
-                                   const char *params __maybe_unused,
+void baseten_function_deployments(const char *transaction,
+                                   char *function __maybe_unused,
                                    usec_t *stop_monotonic_ut __maybe_unused,
                                    bool *cancelled __maybe_unused,
-                                   BUFFER *payload __maybe_unused,
+                                   BUFFER *payload,
                                    HTTP_ACCESS access __maybe_unused,
                                    const char *source __maybe_unused,
                                    void *data __maybe_unused)
 {
     time_t now = now_realtime_sec();
-    BUFFER *wb = buffer_create(0, NULL);
+    BUFFER *wb = payload;
 
     buffer_flush(wb);
     wb->content_type = CT_APPLICATION_JSON;
+    wb->expires = now + config.update_every;
     buffer_json_initialize(wb, "\"", "\"", 0, true, BUFFER_JSON_OPTIONS_DEFAULT);
 
     buffer_json_member_add_uint64(wb, "status", HTTP_RESP_OK);
@@ -32,16 +32,11 @@ void baseten_function_deployments(const char *transaction __maybe_unused,
         if (baseten_fetch_all_data() != 0) {
             buffer_json_member_add_string(wb, "error", "Failed to fetch data from Baseten API");
             buffer_json_finalize(wb);
+            wb->response_code = HTTP_RESP_INTERNAL_SERVER_ERROR;
 
             netdata_mutex_lock(&stdout_mutex);
-            pluginsd_function_result_begin_to_stdout(transaction, HTTP_RESP_INTERNAL_SERVER_ERROR,
-                                                     CT_APPLICATION_JSON, now + config.update_every);
-            fwrite(buffer_tostring(wb), buffer_strlen(wb), 1, stdout);
-            pluginsd_function_result_end_to_stdout();
-            fflush(stdout);
+            pluginsd_function_result_to_stdout(transaction, wb);
             netdata_mutex_unlock(&stdout_mutex);
-
-            buffer_free(wb);
             return;
         }
     }
@@ -203,15 +198,10 @@ void baseten_function_deployments(const char *transaction __maybe_unused,
     buffer_json_member_add_string(wb, "default_sort_column", "model_name");
 
     buffer_json_finalize(wb);
+    wb->response_code = HTTP_RESP_OK;
 
     // Send response
     netdata_mutex_lock(&stdout_mutex);
-    pluginsd_function_result_begin_to_stdout(transaction, HTTP_RESP_OK,
-                                             CT_APPLICATION_JSON, now + config.update_every);
-    fwrite(buffer_tostring(wb), buffer_strlen(wb), 1, stdout);
-    pluginsd_function_result_end_to_stdout();
-    fflush(stdout);
+    pluginsd_function_result_to_stdout(transaction, wb);
     netdata_mutex_unlock(&stdout_mutex);
-
-    buffer_free(wb);
 }

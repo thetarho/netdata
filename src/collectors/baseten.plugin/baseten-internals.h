@@ -126,7 +126,7 @@ const char* baseten_status_to_string(deployment_status_t status);
 deployment_status_t baseten_string_to_status(const char *status_str);
 
 // Function prototypes - table function
-void baseten_function_deployments(const char *transaction, const char *function, const char *params,
+void baseten_function_deployments(const char *transaction, char *function,
                                   usec_t *stop_monotonic_ut, bool *cancelled,
                                   BUFFER *payload, HTTP_ACCESS access,
                                   const char *source, void *data);
