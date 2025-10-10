@@ -3,7 +3,7 @@
 #include "baseten-internals.h"
 
 // Config file instance for this plugin
-struct config netdata_config = INICFG_EMPTY;
+struct config netdata_config = APPCONFIG_INITIALIZER;
 
 void baseten_free_models(struct baseten_model *models) {
     while (models) {
@@ -113,19 +113,22 @@ int baseten_load_config(void) {
     char filename[FILENAME_MAX + 1];
     snprintfz(filename, FILENAME_MAX, "%s/%s", user_config_dir, CONFIG_FILENAME);
 
-    // Load the config file
-    inicfg_load(&netdata_config, filename, INICFG_LOAD_ALLOW_ERRORS);
+    // Load the config file (overwrite_used=0, section_name=NULL)
+    inicfg_load(&netdata_config, filename, 0, NULL);
 
     // Read configuration values
     // API key - check environment variable first (Docker-friendly), then config file
     const char *env_api_key = getenv("NETDATA_BASETEN_API_KEY");
     if (env_api_key && strlen(env_api_key) > 0) {
-        config.api_key = (char *)env_api_key;
+        config.api_key = strdupz(env_api_key);
         collector_info("BASETEN: Using API key from environment variable NETDATA_BASETEN_API_KEY");
     } else {
-        config.api_key = inicfg_get(&netdata_config, CONFIG_SECTION_BASETEN, CONFIG_KEY_API_KEY, "");
-        if (config.api_key && strlen(config.api_key) > 0) {
+        const char *api_key_from_conf = inicfg_get(&netdata_config, CONFIG_SECTION_BASETEN, CONFIG_KEY_API_KEY, "");
+        if (api_key_from_conf && strlen(api_key_from_conf) > 0) {
+            config.api_key = strdupz(api_key_from_conf);
             collector_info("BASETEN: Using API key from %s", filename);
+        } else {
+            config.api_key = NULL;
         }
     }
 
