@@ -1,0 +1,46 @@
+# Netdata Baseten Plugin Configuration
+#
+# This file configures the Baseten model deployments monitoring plugin.
+# To enable this plugin, you need a valid Baseten API key.
+#
+# Get your API key from: https://app.baseten.co/settings/api-keys
+#
+# To apply changes, restart Netdata:
+#   sudo systemctl restart netdata
+
+[plugin:baseten]
+    # Enable or disable the plugin
+    # default: yes
+    # enabled = yes
+
+    # Baseten API key (REQUIRED)
+    # Get this from https://app.baseten.co/settings/api-keys
+    # IMPORTANT: Keep this secret! Restrict file permissions.
+    api key = YOUR_API_KEY_HERE
+
+    # How often to fetch data from Baseten API (in seconds)
+    # Recommended: 60-300 seconds to avoid API rate limits
+    # default: 60
+    update every = 60
+
+    # API request timeout (in seconds)
+    # default: 30
+    timeout = 30
+
+# Examples:
+#
+# Basic configuration (minimal):
+# [plugin:baseten]
+#     api key = bst_xxxxxxxxxxxxxxxxxxxxx
+#
+# Production configuration (recommended):
+# [plugin:baseten]
+#     api key = bst_xxxxxxxxxxxxxxxxxxxxx
+#     update every = 120
+#     timeout = 30
+#
+# Development configuration:
+# [plugin:baseten]
+#     api key = bst_xxxxxxxxxxxxxxxxxxxxx
+#     update every = 30
+#     timeout = 60

@@ -1,0 +1,285 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "baseten-internals.h"
+#include <json-c/json.h>
+
+static CURL *curl_handle = NULL;
+
+// CURL write callback
+static size_t write_memory_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    struct memory_chunk *mem = (struct memory_chunk *)userp;
+
+    char *ptr = reallocz(mem->memory, mem->size + realsize + 1);
+    mem->memory = ptr;
+
+    memcpy(&(mem->memory[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->memory[mem->size] = 0;
+
+    return realsize;
+}
+
+int baseten_api_init(void) {
+    curl_global_init(CURL_GLOBAL_ALL);
+    curl_handle = curl_easy_init();
+
+    if (!curl_handle) {
+        collector_error("BASETEN: Failed to initialize CURL");
+        return -1;
+    }
+
+    return 0;
+}
+
+void baseten_api_cleanup(void) {
+    if (curl_handle) {
+        curl_easy_cleanup(curl_handle);
+        curl_handle = NULL;
+    }
+    curl_global_cleanup();
+}
+
+static int baseten_api_request(const char *endpoint, struct memory_chunk *response) {
+    CURLcode res;
+    long response_code = 0;
+    char url[1024];
+    struct curl_slist *headers = NULL;
+    char auth_header[512];
+
+    if (!curl_handle) {
+        collector_error("BASETEN: CURL not initialized");
+        return -1;
+    }
+
+    // Build URL
+    snprintfz(url, sizeof(url), "%s%s", BASETEN_API_BASE_URL, endpoint);
+
+    // Build authorization header
+    snprintfz(auth_header, sizeof(auth_header), "Api-Key: %s", config.api_key);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Accept: application/json");
+
+    // Initialize response buffer
+    response->memory = mallocz(1);
+    response->size = 0;
+
+    // Configure CURL
+    curl_easy_reset(curl_handle);
+    curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_memory_callback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)response);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, (long)config.timeout);
+    curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 2L);
+
+    // Perform request
+    res = curl_easy_perform(curl_handle);
+
+    if (res != CURLE_OK) {
+        collector_error("BASETEN: CURL request failed: %s", curl_easy_strerror(res));
+        curl_slist_free_all(headers);
+        freez(response->memory);
+        response->memory = NULL;
+        return -1;
+    }
+
+    curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &response_code);
+    curl_slist_free_all(headers);
+
+    if (response_code != 200) {
+        collector_error("BASETEN: API returned HTTP %ld", response_code);
+        freez(response->memory);
+        response->memory = NULL;
+        return -1;
+    }
+
+    return 0;
+}
+
+int baseten_fetch_models(struct baseten_model **models) {
+    struct memory_chunk response;
+    struct baseten_model *model_list = NULL;
+    struct json_object *root, *models_array, *model_obj;
+    int i, array_len;
+
+    if (baseten_api_request(BASETEN_MODELS_ENDPOINT, &response) != 0) {
+        return -1;
+    }
+
+    // Parse JSON
+    root = json_tokener_parse(response.memory);
+    freez(response.memory);
+
+    if (!root) {
+        collector_error("BASETEN: Failed to parse models JSON");
+        return -1;
+    }
+
+    if (!json_object_object_get_ex(root, "models", &models_array)) {
+        collector_error("BASETEN: No 'models' array in response");
+        json_object_put(root);
+        return -1;
+    }
+
+    array_len = json_object_array_length(models_array);
+
+    for (i = 0; i < array_len; i++) {
+        model_obj = json_object_array_get_idx(models_array, i);
+
+        struct baseten_model *model = callocz(1, sizeof(struct baseten_model));
+
+        struct json_object *tmp;
+        if (json_object_object_get_ex(model_obj, "id", &tmp))
+            model->id = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(model_obj, "name", &tmp))
+            model->name = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(model_obj, "instance_type_name", &tmp))
+            model->instance_type_name = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(model_obj, "production_deployment_id", &tmp) &&
+            !json_object_is_type(tmp, json_type_null))
+            model->production_deployment_id = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(model_obj, "development_deployment_id", &tmp) &&
+            !json_object_is_type(tmp, json_type_null))
+            model->development_deployment_id = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(model_obj, "deployments_count", &tmp))
+            model->deployments_count = json_object_get_int(tmp);
+
+        // Add to linked list
+        model->next = model_list;
+        model_list = model;
+    }
+
+    json_object_put(root);
+    *models = model_list;
+
+    return 0;
+}
+
+int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **deployments) {
+    struct memory_chunk response;
+    struct baseten_deployment *deployment_list = NULL;
+    struct json_object *root, *deployments_array, *deployment_obj;
+    char endpoint[512];
+    int i, array_len;
+
+    snprintfz(endpoint, sizeof(endpoint), BASETEN_DEPLOYMENTS_ENDPOINT, model_id);
+
+    if (baseten_api_request(endpoint, &response) != 0) {
+        return -1;
+    }
+
+    // Parse JSON
+    root = json_tokener_parse(response.memory);
+    freez(response.memory);
+
+    if (!root) {
+        collector_error("BASETEN: Failed to parse deployments JSON for model %s", model_id);
+        return -1;
+    }
+
+    if (!json_object_object_get_ex(root, "deployments", &deployments_array)) {
+        collector_error("BASETEN: No 'deployments' array in response for model %s", model_id);
+        json_object_put(root);
+        return -1;
+    }
+
+    array_len = json_object_array_length(deployments_array);
+
+    for (i = 0; i < array_len; i++) {
+        deployment_obj = json_object_array_get_idx(deployments_array, i);
+
+        struct baseten_deployment *deployment = callocz(1, sizeof(struct baseten_deployment));
+
+        struct json_object *tmp;
+        if (json_object_object_get_ex(deployment_obj, "id", &tmp))
+            deployment->id = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(deployment_obj, "name", &tmp))
+            deployment->name = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(deployment_obj, "model_id", &tmp))
+            deployment->model_id = strdupz(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(deployment_obj, "is_production", &tmp))
+            deployment->is_production = json_object_get_boolean(tmp);
+
+        if (json_object_object_get_ex(deployment_obj, "is_development", &tmp))
+            deployment->is_development = json_object_get_boolean(tmp);
+
+        if (json_object_object_get_ex(deployment_obj, "active_replica_count", &tmp))
+            deployment->active_replica_count = json_object_get_int(tmp);
+
+        if (json_object_object_get_ex(deployment_obj, "status", &tmp))
+            deployment->status = baseten_string_to_status(json_object_get_string(tmp));
+
+        if (json_object_object_get_ex(deployment_obj, "environment", &tmp) &&
+            !json_object_is_type(tmp, json_type_null))
+            deployment->environment = strdupz(json_object_get_string(tmp));
+
+        // Add to linked list
+        deployment->next = deployment_list;
+        deployment_list = deployment;
+    }
+
+    json_object_put(root);
+    *deployments = deployment_list;
+
+    return 0;
+}
+
+int baseten_fetch_all_data(void) {
+    struct baseten_model *models = NULL;
+    struct baseten_deployment *all_deployments = NULL;
+
+    // Fetch models
+    if (baseten_fetch_models(&models) != 0) {
+        return -1;
+    }
+
+    // Fetch deployments for each model
+    struct baseten_model *model = models;
+    while (model) {
+        struct baseten_deployment *deployments = NULL;
+
+        if (baseten_fetch_deployments(model->id, &deployments) == 0) {
+            // Link deployments to model
+            struct baseten_deployment *d = deployments;
+            while (d) {
+                d->model = model;
+                d = d->next;
+            }
+
+            // Append to all_deployments list
+            if (deployments) {
+                struct baseten_deployment *last = deployments;
+                while (last->next) last = last->next;
+                last->next = all_deployments;
+                all_deployments = deployments;
+            }
+        }
+
+        model = model->next;
+    }
+
+    // Update cache
+    netdata_mutex_lock(&cache.mutex);
+
+    baseten_free_models(cache.models);
+    baseten_free_deployments(cache.deployments);
+
+    cache.models = models;
+    cache.deployments = all_deployments;
+    cache.last_update = now_realtime_sec();
+
+    netdata_mutex_unlock(&cache.mutex);
+
+    return 0;
+}
