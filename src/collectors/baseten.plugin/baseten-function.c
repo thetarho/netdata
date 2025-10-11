@@ -13,29 +13,30 @@ void baseten_function_deployments(const char *transaction,
                                    const char *source __maybe_unused,
                                    void *data __maybe_unused)
 {
-    time_t now = now_realtime_sec();
-    BUFFER *wb = payload;
+    collector_info("BASETEN: Function 'baseten-deployments' called (transaction: %s)",
+                   transaction ? transaction : "null");
 
-    collector_info("BASETEN: Function 'baseten-deployments' called (transaction: %s, source: %s)",
-                   transaction, source ? source : "unknown");
+    BUFFER *wb = payload;
+    time_t now = now_realtime_sec();
 
     buffer_flush(wb);
     wb->content_type = CT_APPLICATION_JSON;
-    wb->expires = now + config.update_every;
+    wb->expires = now + 120;  // Use literal instead of config.update_every to test
     buffer_json_initialize(wb, "\"", "\"", 0, true, BUFFER_JSON_OPTIONS_DEFAULT);
 
     buffer_json_member_add_uint64(wb, "status", HTTP_RESP_OK);
     buffer_json_member_add_string(wb, "type", "table");
     buffer_json_member_add_boolean(wb, "has_history", false);
     buffer_json_member_add_string(wb, "help", BASETEN_FUNCTION_DESCRIPTION);
-    buffer_json_member_add_time_t(wb, "update_every", config.update_every);
+    buffer_json_member_add_time_t(wb, "update_every", 120);
 
     // Fetch data on-demand
-    collector_info("BASETEN: Fetching fresh data from API...");
+    collector_info("BASETEN: Starting to fetch models...");
 
     struct baseten_model *models = NULL;
     struct baseten_deployment *all_deployments = NULL;
 
+    collector_info("BASETEN: Calling baseten_fetch_models...");
     if (baseten_fetch_models(&models) != 0) {
         collector_error("BASETEN: Failed to fetch models for function call");
         buffer_json_member_add_string(wb, "error", "Failed to fetch models from Baseten API");

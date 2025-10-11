@@ -1670,7 +1670,7 @@ set(STATSD_PLUGIN_FILES
 set(BASETEN_PLUGIN_FILES
         src/collectors/baseten.plugin/baseten-main.c
         src/collectors/baseten.plugin/baseten-api.c
-        src/collectors/baseten.plugin/baseten-function.c
+        src/collectors/baseten.plugin/baseten-function-test.c
         src/collectors/baseten.plugin/baseten-utils.c
         src/collectors/baseten.plugin/baseten-internals.h
 )
