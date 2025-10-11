@@ -5,48 +5,68 @@
 extern const char* baseten_severity_to_string(deployment_severity_t severity);
 
 void baseten_function_deployments(const char *transaction,
-                                   char *function __maybe_unused,
+                                   char *function,
                                    usec_t *stop_monotonic_ut __maybe_unused,
                                    bool *cancelled __maybe_unused,
-                                   BUFFER *payload,
+                                   BUFFER *payload __maybe_unused,
                                    HTTP_ACCESS access __maybe_unused,
                                    const char *source __maybe_unused,
                                    void *data __maybe_unused)
 {
-    collector_info("BASETEN: Function 'baseten-deployments' called (transaction: %s)",
-                   transaction ? transaction : "null");
+    // Parse function parameters properly (following apps.plugin pattern)
+    char *words[PLUGINSD_MAX_WORDS] = { NULL };
+    size_t num_words = quoted_strings_splitter_whitespace(function, words, PLUGINSD_MAX_WORDS);
+    bool info = false;
 
-    BUFFER *wb = payload;
-    time_t now = now_realtime_sec();
+    // Parse parameters to detect "info" request
+    for(int i = 1; i < PLUGINSD_MAX_WORDS; i++) {
+        const char *keyword = get_word(words, num_words, i);
+        if(!keyword) break;
 
-    buffer_flush(wb);
-    wb->content_type = CT_APPLICATION_JSON;
-    wb->expires = now + 120;  // Use literal instead of config.update_every to test
+        if(strcmp(keyword, "info") == 0) {
+            info = true;
+            break;
+        }
+    }
+
+    collector_info("BASETEN: Function called (transaction: %s, info: %s)",
+                   transaction, info ? "yes" : "no");
+
+    // ALWAYS create a new buffer for response (following apps.plugin pattern)
+    BUFFER *wb = buffer_create(4096, NULL);
     buffer_json_initialize(wb, "\"", "\"", 0, true, BUFFER_JSON_OPTIONS_DEFAULT);
 
+    time_t now = now_realtime_sec();
+
+    // Add common response fields
     buffer_json_member_add_uint64(wb, "status", HTTP_RESP_OK);
     buffer_json_member_add_string(wb, "type", "table");
     buffer_json_member_add_boolean(wb, "has_history", false);
     buffer_json_member_add_string(wb, "help", BASETEN_FUNCTION_DESCRIPTION);
-    buffer_json_member_add_time_t(wb, "update_every", 120);
+    buffer_json_member_add_time_t(wb, "update_every", config.update_every);
 
-    // Fetch data on-demand
-    collector_info("BASETEN: Starting to fetch models...");
+    if(info) {
+        // Info request - add accepted parameters and return
+        collector_info("BASETEN: Returning function metadata (info request)");
+
+        buffer_json_member_add_array(wb, "accepted_params");
+        buffer_json_add_array_item_string(wb, "info");
+        buffer_json_array_close(wb);
+
+        goto close_and_send;
+    }
+
+    // Data request - fetch and return deployment data
+    collector_info("BASETEN: Fetching deployment data from API...");
 
     struct baseten_model *models = NULL;
     struct baseten_deployment *all_deployments = NULL;
 
-    collector_info("BASETEN: Calling baseten_fetch_models...");
     if (baseten_fetch_models(&models) != 0) {
         collector_error("BASETEN: Failed to fetch models for function call");
         buffer_json_member_add_string(wb, "error", "Failed to fetch models from Baseten API");
-        buffer_json_finalize(wb);
         wb->response_code = HTTP_RESP_INTERNAL_SERVER_ERROR;
-
-        netdata_mutex_lock(&stdout_mutex);
-        pluginsd_function_result_to_stdout(transaction, wb);
-        netdata_mutex_unlock(&stdout_mutex);
-        return;
+        goto close_and_send;
     }
 
     // Fetch deployments for each model
@@ -231,20 +251,27 @@ void baseten_function_deployments(const char *transaction,
     // Set default sort column
     buffer_json_member_add_string(wb, "default_sort_column", "model_name");
 
-    buffer_json_finalize(wb);
-    wb->response_code = HTTP_RESP_OK;
-
-    collector_info("BASETEN: Function response prepared successfully (transaction: %s, deployments: %d)",
-                   transaction, total_deployments);
-
-    // Send response
-    netdata_mutex_lock(&stdout_mutex);
-    pluginsd_function_result_to_stdout(transaction, wb);
-    netdata_mutex_unlock(&stdout_mutex);
-
-    collector_info("BASETEN: Function response sent (transaction: %s)", transaction);
+    collector_info("BASETEN: Response prepared with %d deployments", total_deployments);
 
     // Free allocated memory
     baseten_free_models(models);
     baseten_free_deployments(all_deployments);
+
+close_and_send:
+    // Finalize and send response (following apps.plugin pattern)
+    buffer_json_finalize(wb);
+
+    // Set buffer properties
+    if (wb->response_code == 0)
+        wb->response_code = HTTP_RESP_OK;
+    wb->content_type = CT_APPLICATION_JSON;
+    wb->expires = now + config.update_every;
+
+    // Send response using standard API
+    pluginsd_function_result_to_stdout(transaction, wb);
+
+    // Free buffer
+    buffer_free(wb);
+
+    collector_info("BASETEN: Response sent successfully");
 }
