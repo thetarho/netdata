@@ -241,7 +241,7 @@ void baseten_function_deployments(const char *transaction,
         buffer_rrdf_table_add_field(
             wb, field_id++, "rowOptions", "rowOptions",
             RRDF_FIELD_TYPE_NONE, RRDR_FIELD_VISUAL_ROW_OPTIONS, RRDF_FIELD_TRANSFORM_NONE,
-            0, NULL, NAN, RRDF_FIELD_SORT_FIXED, NULL,
+            0, NULL, NAN, RRDF_FIELD_SORT_ASCENDING, NULL,
             RRDF_FIELD_SUMMARY_COUNT, RRDF_FIELD_FILTER_NONE,
             RRDF_FIELD_OPTS_DUMMY,
             NULL);
