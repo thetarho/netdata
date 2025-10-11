@@ -274,4 +274,200 @@ int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **
     return 0;
 }
 
-// Removed baseten_fetch_all_data() - data is now fetched on-demand in the function handler
+// Structure to track parallel requests
+struct parallel_request {
+    CURL *handle;
+    char *model_id;
+    struct baseten_model *model;
+    struct memory_chunk response;
+    char url[1024];
+    char auth_header[512];
+    struct curl_slist *headers;
+};
+
+// Fetch all deployments in parallel using CURL multi interface
+int baseten_fetch_all_deployments_parallel(struct baseten_model *models, struct baseten_deployment **all_deployments, int *total_count) {
+    CURLM *multi_handle;
+    int still_running = 0;
+    int num_models = 0;
+    struct parallel_request *requests = NULL;
+    struct baseten_deployment *deployment_list = NULL;
+    int total = 0;
+
+    collector_info("BASETEN: Starting parallel deployment fetch...");
+
+    // Count models
+    struct baseten_model *m = models;
+    while (m) {
+        num_models++;
+        m = m->next;
+    }
+
+    if (num_models == 0) {
+        collector_info("BASETEN: No models to fetch deployments for");
+        *all_deployments = NULL;
+        *total_count = 0;
+        return 0;
+    }
+
+    collector_info("BASETEN: Fetching deployments for %d models in parallel", num_models);
+
+    // Allocate request structures
+    requests = callocz(num_models, sizeof(struct parallel_request));
+
+    // Initialize multi handle
+    multi_handle = curl_multi_init();
+    if (!multi_handle) {
+        collector_error("BASETEN: Failed to initialize CURL multi handle");
+        freez(requests);
+        return -1;
+    }
+
+    // Set up parallel requests
+    int idx = 0;
+    m = models;
+    while (m) {
+        struct parallel_request *req = &requests[idx];
+
+        req->model = m;
+        req->model_id = m->id;
+        req->handle = curl_easy_init();
+
+        if (!req->handle) {
+            collector_error("BASETEN: Failed to create CURL handle for model %s", m->id);
+            idx++;
+            m = m->next;
+            continue;
+        }
+
+        // Build URL
+        snprintfz(req->url, sizeof(req->url), "%s/models/%s/deployments", BASETEN_API_BASE_URL, m->id);
+
+        // Set up auth header
+        snprintfz(req->auth_header, sizeof(req->auth_header), "Authorization: Api-Key %s", config.api_key);
+        req->headers = curl_slist_append(NULL, req->auth_header);
+        req->headers = curl_slist_append(req->headers, "Accept: application/json");
+
+        // Initialize response buffer
+        req->response.memory = mallocz(1);
+        req->response.size = 0;
+
+        // Configure CURL handle
+        curl_easy_setopt(req->handle, CURLOPT_URL, req->url);
+        curl_easy_setopt(req->handle, CURLOPT_HTTPHEADER, req->headers);
+        curl_easy_setopt(req->handle, CURLOPT_WRITEFUNCTION, write_memory_callback);
+        curl_easy_setopt(req->handle, CURLOPT_WRITEDATA, (void *)&req->response);
+        curl_easy_setopt(req->handle, CURLOPT_TIMEOUT, (long)config.timeout);
+        curl_easy_setopt(req->handle, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(req->handle, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(req->handle, CURLOPT_SSL_VERIFYHOST, 2L);
+
+        // Add to multi handle
+        curl_multi_add_handle(multi_handle, req->handle);
+
+        idx++;
+        m = m->next;
+    }
+
+    // Perform parallel requests
+    curl_multi_perform(multi_handle, &still_running);
+
+    while (still_running) {
+        int numfds = 0;
+        CURLMcode mc = curl_multi_wait(multi_handle, NULL, 0, 1000, &numfds);
+
+        if (mc != CURLM_OK) {
+            collector_error("BASETEN: curl_multi_wait() failed: %s", curl_multi_strerror(mc));
+            break;
+        }
+
+        curl_multi_perform(multi_handle, &still_running);
+    }
+
+    collector_info("BASETEN: All parallel requests completed, processing responses...");
+
+    // Process responses
+    for (int i = 0; i < num_models; i++) {
+        struct parallel_request *req = &requests[i];
+
+        if (!req->handle) continue;
+
+        long response_code = 0;
+        curl_easy_getinfo(req->handle, CURLINFO_RESPONSE_CODE, &response_code);
+
+        if (response_code == 200 && req->response.memory && req->response.size > 0) {
+            // Parse JSON response
+            struct json_object *root = json_tokener_parse(req->response.memory);
+
+            if (root) {
+                struct json_object *deployments_array;
+                if (json_object_object_get_ex(root, "deployments", &deployments_array)) {
+                    int array_len = json_object_array_length(deployments_array);
+
+                    collector_info("BASETEN: Model %s: %d deployments", req->model_id, array_len);
+
+                    for (int j = 0; j < array_len; j++) {
+                        struct json_object *deployment_obj = json_object_array_get_idx(deployments_array, j);
+                        struct baseten_deployment *deployment = callocz(1, sizeof(struct baseten_deployment));
+
+                        struct json_object *tmp;
+                        if (json_object_object_get_ex(deployment_obj, "id", &tmp))
+                            deployment->id = strdupz(json_object_get_string(tmp));
+
+                        if (json_object_object_get_ex(deployment_obj, "name", &tmp))
+                            deployment->name = strdupz(json_object_get_string(tmp));
+
+                        if (json_object_object_get_ex(deployment_obj, "model_id", &tmp))
+                            deployment->model_id = strdupz(json_object_get_string(tmp));
+
+                        if (json_object_object_get_ex(deployment_obj, "is_production", &tmp))
+                            deployment->is_production = json_object_get_boolean(tmp);
+
+                        if (json_object_object_get_ex(deployment_obj, "is_development", &tmp))
+                            deployment->is_development = json_object_get_boolean(tmp);
+
+                        if (json_object_object_get_ex(deployment_obj, "active_replica_count", &tmp))
+                            deployment->active_replica_count = json_object_get_int(tmp);
+
+                        if (json_object_object_get_ex(deployment_obj, "status", &tmp))
+                            deployment->status = baseten_string_to_status(json_object_get_string(tmp));
+
+                        if (json_object_object_get_ex(deployment_obj, "environment", &tmp) && !json_object_is_type(tmp, json_type_null))
+                            deployment->environment = strdupz(json_object_get_string(tmp));
+
+                        // Link to model
+                        deployment->model = req->model;
+
+                        // Add to linked list
+                        deployment->next = deployment_list;
+                        deployment_list = deployment;
+                        total++;
+                    }
+                }
+
+                json_object_put(root);
+            } else {
+                collector_error("BASETEN: Failed to parse JSON for model %s", req->model_id);
+            }
+        } else {
+            collector_error("BASETEN: Model %s returned HTTP %ld or empty response", req->model_id, response_code);
+        }
+
+        // Cleanup
+        if (req->response.memory)
+            freez(req->response.memory);
+        if (req->headers)
+            curl_slist_free_all(req->headers);
+        curl_multi_remove_handle(multi_handle, req->handle);
+        curl_easy_cleanup(req->handle);
+    }
+
+    curl_multi_cleanup(multi_handle);
+    freez(requests);
+
+    *all_deployments = deployment_list;
+    *total_count = total;
+
+    collector_info("BASETEN: Parallel fetch complete - fetched %d total deployments", total);
+    return 0;
+}

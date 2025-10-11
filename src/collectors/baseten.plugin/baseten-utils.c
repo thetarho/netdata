@@ -55,33 +55,34 @@ deployment_status_t baseten_string_to_status(const char *status_str) {
 const char* baseten_status_to_string(deployment_status_t status) {
     switch (status) {
         case STATUS_ACTIVE:
-            return "ACTIVE";
+            return "Active";
         case STATUS_SCALED_TO_ZERO:
-            return "SCALED_TO_ZERO";
+            return "Scaled to Zero";
         case STATUS_INACTIVE:
-            return "INACTIVE";
+            return "Inactive";
         case STATUS_DEPLOYING:
-            return "DEPLOYING";
+            return "Deploying";
         case STATUS_FAILED:
-            return "FAILED";
+            return "Failed";
         default:
-            return "UNKNOWN";
+            return "Unknown";
     }
 }
 
 deployment_severity_t baseten_get_severity(deployment_status_t status) {
     switch (status) {
         case STATUS_ACTIVE:
-            return DEPLOYMENT_SEVERITY_NORMAL;
-        case STATUS_SCALED_TO_ZERO:
-        case STATUS_INACTIVE:
-            return DEPLOYMENT_SEVERITY_WARNING;
-        case STATUS_FAILED:
-            return DEPLOYMENT_SEVERITY_ERROR;
+            return DEPLOYMENT_SEVERITY_NORMAL;  // Green/normal - healthy
         case STATUS_DEPLOYING:
-            return DEPLOYMENT_SEVERITY_NOTICE;
+            return DEPLOYMENT_SEVERITY_NOTICE;  // Blue - in progress
+        case STATUS_SCALED_TO_ZERO:
+            return DEPLOYMENT_SEVERITY_WARNING; // Yellow/orange - attention needed
+        case STATUS_INACTIVE:
+            return DEPLOYMENT_SEVERITY_WARNING; // Yellow/orange - not running
+        case STATUS_FAILED:
+            return DEPLOYMENT_SEVERITY_ERROR;   // Red - critical issue
         default:
-            return DEPLOYMENT_SEVERITY_NORMAL;
+            return DEPLOYMENT_SEVERITY_NORMAL;  // Unknown status
     }
 }
 

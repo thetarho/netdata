@@ -67,6 +67,7 @@ void baseten_function_deployments(
 
     struct baseten_model *models = NULL;
     struct baseten_deployment *all_deployments = NULL;
+    int total_deployments = 0;
 
     if (baseten_fetch_models(&models) != 0) {
         collector_error("BASETEN: Failed to fetch models for function call");
@@ -75,33 +76,13 @@ void baseten_function_deployments(
         goto close_and_send;
     }
 
-    // Fetch deployments for each model
-    struct baseten_model *model = models;
-    int total_deployments = 0;
-
-    while (model) {
-        struct baseten_deployment *deployments = NULL;
-
-        if (baseten_fetch_deployments(model->id, &deployments) == 0) {
-            // Link deployments to model
-            struct baseten_deployment *d = deployments;
-            while (d) {
-                d->model = model;
-                total_deployments++;
-                d = d->next;
-            }
-
-            // Append to all_deployments list
-            if (deployments) {
-                struct baseten_deployment *last = deployments;
-                while (last->next)
-                    last = last->next;
-                last->next = all_deployments;
-                all_deployments = deployments;
-            }
-        }
-
-        model = model->next;
+    // Fetch all deployments in parallel for massive speedup
+    if (baseten_fetch_all_deployments_parallel(models, &all_deployments, &total_deployments) != 0) {
+        collector_error("BASETEN: Failed to fetch deployments in parallel");
+        buffer_json_member_add_string(wb, "error", "Failed to fetch deployments from Baseten API");
+        baseten_free_models(models);
+        wb->response_code = HTTP_RESP_INTERNAL_SERVER_ERROR;
+        goto close_and_send;
     }
 
     collector_info("BASETEN: Building response table with %d deployments", total_deployments);

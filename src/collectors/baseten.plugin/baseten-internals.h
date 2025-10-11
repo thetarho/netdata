@@ -12,8 +12,8 @@
 #define PLUGIN_BASETEN_NAME "baseten.plugin"
 #define BASETEN_FUNCTION_NAME "baseten-deployments"
 #define BASETEN_FUNCTION_DESCRIPTION "View Baseten AI model deployments with status, environment, and resource information"
-#define BASETEN_DEFAULT_TIMEOUT 30
-#define BASETEN_UPDATE_EVERY 60
+#define BASETEN_DEFAULT_TIMEOUT 60
+#define BASETEN_UPDATE_EVERY 120
 
 // API endpoints
 #define BASETEN_API_BASE_URL "https://api.baseten.co/v1"
@@ -104,6 +104,7 @@ int baseten_api_init(void);
 void baseten_api_cleanup(void);
 int baseten_fetch_models(struct baseten_model **models);
 int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **deployments);
+int baseten_fetch_all_deployments_parallel(struct baseten_model *models, struct baseten_deployment **all_deployments, int *total_count);
 
 // Function prototypes - data management
 void baseten_free_models(struct baseten_model *models);
