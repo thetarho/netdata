@@ -10,7 +10,7 @@
 
 // Plugin constants
 #define PLUGIN_BASETEN_NAME "baseten.plugin"
-#define BASETEN_FUNCTION_NAME "deployments"
+#define BASETEN_FUNCTION_NAME "baseten-deployments"
 #define BASETEN_FUNCTION_DESCRIPTION "View Baseten AI model deployments with status, environment, and resource information"
 #define BASETEN_DEFAULT_TIMEOUT 30
 #define BASETEN_UPDATE_EVERY 60

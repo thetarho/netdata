@@ -72,19 +72,7 @@ int main(int argc __maybe_unused, char **argv __maybe_unused) {
         exit(1);
     }
 
-    // Initial data fetch to verify API connectivity
-    collector_info("BASETEN: Performing initial data fetch...");
-    if (baseten_fetch_all_data() != 0) {
-        collector_error("BASETEN: Initial data fetch failed. Check API key and connectivity.");
-        fprintf(stdout, "DISABLE\n");
-        fflush(stdout);
-        cleanup();
-        exit(1);
-    }
-
-    collector_info("BASETEN: Successfully fetched initial data");
-
-    // Initialize functions event loop
+    // Initialize functions event loop FIRST (before data fetch)
     collector_info("BASETEN: Initializing functions event loop with %d worker threads...", BASETEN_WORKER_THREADS);
     struct functions_evloop_globals *wg =
         functions_evloop_init(BASETEN_WORKER_THREADS, "BASETEN", &stdout_mutex, &plugin_should_exit);
@@ -94,7 +82,7 @@ int main(int argc __maybe_unused, char **argv __maybe_unused) {
 
     collector_info("BASETEN: Registering function '%s' with Netdata...", BASETEN_FUNCTION_NAME);
 
-    // Register function with netdata
+    // Register function with netdata IMMEDIATELY (before data fetch to avoid timeout)
     netdata_mutex_lock(&stdout_mutex);
 
     fprintf(
@@ -108,6 +96,18 @@ int main(int argc __maybe_unused, char **argv __maybe_unused) {
 
     fflush(stdout);
     netdata_mutex_unlock(&stdout_mutex);
+
+    collector_info("BASETEN: Plugin registered with Netdata - function is now available");
+
+    // NOW fetch initial data (after registration, so Netdata knows we're alive)
+    // This prevents timeout during slow initial fetch of 70+ models
+    collector_info("BASETEN: Performing initial data fetch in background...");
+    if (baseten_fetch_all_data() != 0) {
+        collector_error("BASETEN: Initial data fetch failed. Will retry in main loop.");
+        // Don't exit - let the plugin continue and retry in the main loop
+    } else {
+        collector_info("BASETEN: Successfully fetched initial data");
+    }
 
     collector_info("BASETEN: Plugin initialized successfully - entering main loop");
 
