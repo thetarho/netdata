@@ -113,6 +113,8 @@ int baseten_load_config(void) {
     char filename[FILENAME_MAX + 1];
     snprintfz(filename, FILENAME_MAX, "%s/%s", user_config_dir, CONFIG_FILENAME);
 
+    collector_info("BASETEN: Loading configuration from %s", filename);
+
     // Load the config file (overwrite_used=0, section_name=NULL)
     inicfg_load(&netdata_config, filename, 0, NULL);
 

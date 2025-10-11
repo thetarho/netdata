@@ -16,6 +16,9 @@ void baseten_function_deployments(const char *transaction,
     time_t now = now_realtime_sec();
     BUFFER *wb = payload;
 
+    collector_info("BASETEN: Function 'deployments' called (transaction: %s, source: %s)",
+                   transaction, source ? source : "unknown");
+
     buffer_flush(wb);
     wb->content_type = CT_APPLICATION_JSON;
     wb->expires = now + config.update_every;
@@ -28,8 +31,12 @@ void baseten_function_deployments(const char *transaction,
     buffer_json_member_add_time_t(wb, "update_every", config.update_every);
 
     // Check if cache is fresh, otherwise refresh
-    if (now - cache.last_update > BASETEN_CACHE_TTL) {
+    time_t cache_age = now - cache.last_update;
+    if (cache_age > BASETEN_CACHE_TTL) {
+        collector_info("BASETEN: Cache is stale (age: %ld seconds, TTL: %d seconds), refreshing...",
+                       (long)cache_age, BASETEN_CACHE_TTL);
         if (baseten_fetch_all_data() != 0) {
+            collector_error("BASETEN: Failed to refresh cache for function call");
             buffer_json_member_add_string(wb, "error", "Failed to fetch data from Baseten API");
             buffer_json_finalize(wb);
             wb->response_code = HTTP_RESP_INTERNAL_SERVER_ERROR;
@@ -39,12 +46,23 @@ void baseten_function_deployments(const char *transaction,
             netdata_mutex_unlock(&stdout_mutex);
             return;
         }
+    } else {
+        collector_info("BASETEN: Using cached data (age: %ld seconds)", (long)cache_age);
     }
 
     // Start data array
     buffer_json_member_add_array(wb, "data");
 
     netdata_mutex_lock(&cache.mutex);
+
+    // Count deployments for logging
+    int deployment_count = 0;
+    struct baseten_deployment *temp = cache.deployments;
+    while (temp) {
+        deployment_count++;
+        temp = temp->next;
+    }
+    collector_info("BASETEN: Building response table with %d deployments", deployment_count);
 
     struct baseten_deployment *deployment = cache.deployments;
     while (deployment) {
@@ -200,8 +218,13 @@ void baseten_function_deployments(const char *transaction,
     buffer_json_finalize(wb);
     wb->response_code = HTTP_RESP_OK;
 
+    collector_info("BASETEN: Function response prepared successfully (transaction: %s, deployments: %d)",
+                   transaction, deployment_count);
+
     // Send response
     netdata_mutex_lock(&stdout_mutex);
     pluginsd_function_result_to_stdout(transaction, wb);
     netdata_mutex_unlock(&stdout_mutex);
+
+    collector_info("BASETEN: Function response sent (transaction: %s)", transaction);
 }
