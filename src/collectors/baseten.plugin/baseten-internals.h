@@ -26,9 +26,6 @@
 #define CONFIG_KEY_UPDATE_EVERY "update every"
 #define CONFIG_KEY_TIMEOUT "timeout"
 
-// Cache settings
-#define BASETEN_CACHE_TTL 60  // seconds
-
 // Status severity mappings
 typedef enum {
     DEPLOYMENT_SEVERITY_NORMAL,
@@ -85,13 +82,6 @@ struct baseten_deployment {
     struct baseten_deployment *next;
 };
 
-struct baseten_cache {
-    struct baseten_model *models;
-    struct baseten_deployment *deployments;
-    time_t last_update;
-    netdata_mutex_t mutex;
-};
-
 struct baseten_config {
     char *api_key;
     int update_every;
@@ -106,7 +96,6 @@ struct memory_chunk {
 
 // Global state
 extern struct baseten_config config;
-extern struct baseten_cache cache;
 extern netdata_mutex_t stdout_mutex;
 extern bool plugin_should_exit;
 
@@ -115,7 +104,6 @@ int baseten_api_init(void);
 void baseten_api_cleanup(void);
 int baseten_fetch_models(struct baseten_model **models);
 int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **deployments);
-int baseten_fetch_all_data(void);
 
 // Function prototypes - data management
 void baseten_free_models(struct baseten_model *models);

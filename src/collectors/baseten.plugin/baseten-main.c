@@ -17,29 +17,19 @@ const char *netdata_configured_host_prefix = "";
 
 // Global state
 struct baseten_config config = {0};
-struct baseten_cache cache = {0};
 netdata_mutex_t stdout_mutex;
 bool plugin_should_exit = false;
 
 static void __attribute__((constructor)) init_mutex(void) {
     netdata_mutex_init(&stdout_mutex);
-    netdata_mutex_init(&cache.mutex);
 }
 
 static void __attribute__((destructor)) destroy_mutex(void) {
     netdata_mutex_destroy(&stdout_mutex);
-    netdata_mutex_destroy(&cache.mutex);
 }
 
 static void cleanup(void) {
     baseten_api_cleanup();
-
-    netdata_mutex_lock(&cache.mutex);
-    baseten_free_models(cache.models);
-    baseten_free_deployments(cache.deployments);
-    cache.models = NULL;
-    cache.deployments = NULL;
-    netdata_mutex_unlock(&cache.mutex);
 }
 
 int main(int argc __maybe_unused, char **argv __maybe_unused) {
@@ -98,22 +88,11 @@ int main(int argc __maybe_unused, char **argv __maybe_unused) {
     netdata_mutex_unlock(&stdout_mutex);
 
     collector_info("BASETEN: Plugin registered with Netdata - function is now available");
-
-    // NOW fetch initial data (after registration, so Netdata knows we're alive)
-    // This prevents timeout during slow initial fetch of 70+ models
-    collector_info("BASETEN: Performing initial data fetch in background...");
-    if (baseten_fetch_all_data() != 0) {
-        collector_error("BASETEN: Initial data fetch failed. Will retry in main loop.");
-        // Don't exit - let the plugin continue and retry in the main loop
-    } else {
-        collector_info("BASETEN: Successfully fetched initial data");
-    }
-
     collector_info("BASETEN: Plugin initialized successfully - entering main loop");
+    collector_info("BASETEN: Data will be fetched on-demand when function is called");
 
-    // Main loop - send heartbeat and refresh data periodically
+    // Main loop - just send heartbeat (no periodic data fetch, data is fetched on-demand)
     usec_t send_newline_ut = 0;
-    usec_t refresh_data_ut = 0;
     const bool tty = isatty(fileno(stdout)) == 1;
 
     heartbeat_t hb;
@@ -122,23 +101,11 @@ int main(int argc __maybe_unused, char **argv __maybe_unused) {
     while (!plugin_should_exit) {
         usec_t dt_ut = heartbeat_next(&hb);
         send_newline_ut += dt_ut;
-        refresh_data_ut += dt_ut;
 
         // Send newline heartbeat
         if (!tty && send_newline_ut > USEC_PER_SEC) {
             send_newline_and_flush(&stdout_mutex);
             send_newline_ut = 0;
-        }
-
-        // Refresh data periodically
-        if (refresh_data_ut > (config.update_every * USEC_PER_SEC)) {
-            collector_info("BASETEN: Periodic data refresh triggered (interval: %d seconds)", config.update_every);
-            if (baseten_fetch_all_data() != 0) {
-                collector_error("BASETEN: Periodic data refresh failed");
-            } else {
-                collector_info("BASETEN: Periodic data refresh completed successfully");
-            }
-            refresh_data_ut = 0;
         }
     }
 
