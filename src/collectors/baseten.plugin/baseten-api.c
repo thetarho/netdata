@@ -6,7 +6,8 @@
 static CURL *curl_handle = NULL;
 
 // CURL write callback
-static size_t write_memory_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+static size_t write_memory_callback(void *contents, size_t size, size_t nmemb, void *userp)
+{
     size_t realsize = size * nmemb;
     struct memory_chunk *mem = (struct memory_chunk *)userp;
 
@@ -20,7 +21,8 @@ static size_t write_memory_callback(void *contents, size_t size, size_t nmemb, v
     return realsize;
 }
 
-int baseten_api_init(void) {
+int baseten_api_init(void)
+{
     collector_info("BASETEN: Initializing API client...");
 
     curl_global_init(CURL_GLOBAL_ALL);
@@ -35,7 +37,8 @@ int baseten_api_init(void) {
     return 0;
 }
 
-void baseten_api_cleanup(void) {
+void baseten_api_cleanup(void)
+{
     collector_info("BASETEN: Cleaning up API client...");
 
     if (curl_handle) {
@@ -47,7 +50,8 @@ void baseten_api_cleanup(void) {
     collector_info("BASETEN: API client cleanup complete");
 }
 
-static int baseten_api_request(const char *endpoint, struct memory_chunk *response) {
+static int baseten_api_request(const char *endpoint, struct memory_chunk *response)
+{
     CURLcode res;
     long response_code = 0;
     char url[1024];
@@ -61,10 +65,15 @@ static int baseten_api_request(const char *endpoint, struct memory_chunk *respon
 
     // Build URL
     snprintfz(url, sizeof(url), "%s%s", BASETEN_API_BASE_URL, endpoint);
-    collector_info("BASETEN: Making API request to endpoint: %s", endpoint);
 
-    // Build authorization header
-    snprintfz(auth_header, sizeof(auth_header), "Api-Key: %s", config.api_key);
+    char api_key_preview[16] = {0};
+    if (config.api_key && strlen(config.api_key) >= 8) {
+        strncpy(api_key_preview, config.api_key, 8);
+        strcat(api_key_preview, "...");
+    }
+    collector_info("BASETEN: Making API request to %s (API key: %s)", endpoint, api_key_preview);
+
+    snprintfz(auth_header, sizeof(auth_header), "Authorization: Api-Key %s", config.api_key);
     headers = curl_slist_append(headers, auth_header);
     headers = curl_slist_append(headers, "Accept: application/json");
 
@@ -98,18 +107,28 @@ static int baseten_api_request(const char *endpoint, struct memory_chunk *respon
     curl_slist_free_all(headers);
 
     if (response_code != 200) {
-        collector_error("BASETEN: API endpoint %s returned HTTP %ld", endpoint, response_code);
+        // Log error with response body (limited to first 500 chars for debugging)
+        char error_preview[512] = {0};
+        if (response->memory && response->size > 0) {
+            size_t preview_len = response->size < 500 ? response->size : 500;
+            strncpy(error_preview, response->memory, preview_len);
+            collector_error("BASETEN: API endpoint %s returned HTTP %ld - Response: %s",
+                          endpoint, response_code, error_preview);
+        } else {
+            collector_error("BASETEN: API endpoint %s returned HTTP %ld (no response body)",
+                          endpoint, response_code);
+        }
         freez(response->memory);
         response->memory = NULL;
         return -1;
     }
 
-    collector_info("BASETEN: Successfully fetched data from %s (response size: %zu bytes)",
-                   endpoint, response->size);
+    collector_info("BASETEN: Successfully fetched data from %s (response size: %zu bytes)", endpoint, response->size);
     return 0;
 }
 
-int baseten_fetch_models(struct baseten_model **models) {
+int baseten_fetch_models(struct baseten_model **models)
+{
     struct memory_chunk response;
     struct baseten_model *model_list = NULL;
     struct json_object *root, *models_array, *model_obj;
@@ -178,7 +197,8 @@ int baseten_fetch_models(struct baseten_model **models) {
     return 0;
 }
 
-int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **deployments) {
+int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **deployments)
+{
     struct memory_chunk response;
     struct baseten_deployment *deployment_list = NULL;
     struct json_object *root, *deployments_array, *deployment_obj;
@@ -239,8 +259,7 @@ int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **
         if (json_object_object_get_ex(deployment_obj, "status", &tmp))
             deployment->status = baseten_string_to_status(json_object_get_string(tmp));
 
-        if (json_object_object_get_ex(deployment_obj, "environment", &tmp) &&
-            !json_object_is_type(tmp, json_type_null))
+        if (json_object_object_get_ex(deployment_obj, "environment", &tmp) && !json_object_is_type(tmp, json_type_null))
             deployment->environment = strdupz(json_object_get_string(tmp));
 
         // Add to linked list
@@ -255,7 +274,8 @@ int baseten_fetch_deployments(const char *model_id, struct baseten_deployment **
     return 0;
 }
 
-int baseten_fetch_all_data(void) {
+int baseten_fetch_all_data(void)
+{
     struct baseten_model *models = NULL;
     struct baseten_deployment *all_deployments = NULL;
     int total_deployments = 0;
@@ -298,14 +318,17 @@ int baseten_fetch_all_data(void) {
             // Append to all_deployments list
             if (deployments) {
                 struct baseten_deployment *last = deployments;
-                while (last->next) last = last->next;
+                while (last->next)
+                    last = last->next;
                 last->next = all_deployments;
                 all_deployments = deployments;
             }
         } else {
             models_with_errors++;
-            collector_error("BASETEN: Failed to fetch deployments for model %s (name: %s)",
-                          model->id, model->name ? model->name : "unknown");
+            collector_error(
+                "BASETEN: Failed to fetch deployments for model %s (name: %s)",
+                model->id,
+                model->name ? model->name : "unknown");
         }
 
         model = model->next;
@@ -323,8 +346,11 @@ int baseten_fetch_all_data(void) {
 
     netdata_mutex_unlock(&cache.mutex);
 
-    collector_info("BASETEN: Data fetch cycle complete - %d models, %d total deployments, %d errors",
-                   model_count, total_deployments, models_with_errors);
+    collector_info(
+        "BASETEN: Data fetch cycle complete - %d models, %d total deployments, %d errors",
+        model_count,
+        total_deployments,
+        models_with_errors);
 
     return 0;
 }
